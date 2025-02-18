@@ -32,6 +32,9 @@ class ElasticHashTable:
         # Returns the index for the j-th quadratic probe.
         return (self._hash(key, level) + j * j) % table_size
 
+    def __setitem__(self, key, value):
+        self.insert(key, value)
+
     def insert(self, key, value):
         if self.num_inserts >= self.max_inserts:
             raise RuntimeError(
@@ -86,6 +89,15 @@ class ElasticHashTable:
                         self.num_inserts += 1
                         return True
         raise RuntimeError("Insertion failed in all levels; hash table is full.")
+
+    def __getitem__(self, key):
+        ret = self.search(key)
+        if ret is None:
+            raise KeyError(key)
+        return ret
+
+    def get(self, key, default=None):
+        return self.search(key) or default
 
     def search(self, key):
         for i, level in enumerate(self.levels):

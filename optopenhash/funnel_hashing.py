@@ -57,6 +57,9 @@ class FunnelHashTable:
     def _hash_special(self, key):
         return hash((key, self.special_salt)) & 0x7FFFFFFF
 
+    def __setitem__(self, key, value):
+        self.insert(key, value)
+
     def insert(self, key, value):
         if self.num_inserts >= self.max_inserts:
             raise RuntimeError(
@@ -103,6 +106,15 @@ class FunnelHashTable:
             return True
         else:
             raise RuntimeError("Special array insertion failed; table is full.")
+
+    def __getitem__(self, key):
+        ret = self.search(key)
+        if ret is None:
+            raise KeyError(key)
+        return ret
+
+    def get(self, key, default=None):
+        return self.search(key) or default
 
     def search(self, key):
         for i in range(len(self.levels)):
