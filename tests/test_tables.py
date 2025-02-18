@@ -8,10 +8,16 @@ def test_elastic_hash_table():
     et = ElasticHashTable(capacity, delta)
     n_insert = capacity - int(delta * capacity)
     for i in range(n_insert):
-        et.insert(f"key{i}", f"value{i}")
+        if i % 2:
+            et.insert(f"key{i}", f"value{i}")
+        else:
+            et[f"key{i}"] = f"value{i}"
     # Check that inserted keys are found
     for i in range(n_insert):
-        assert et.search(f"key{i}") == f"value{i}"
+        if i % 2:
+            assert et[f"key{i}"] == f"value{i}"
+        else:
+            assert et.search(f"key{i}") == f"value{i}"
     # A key that was not inserted should return None
     assert et.search("nonexistent") is None
 
@@ -22,10 +28,16 @@ def test_funnel_hash_table():
     ft = FunnelHashTable(capacity, delta)
     n_insert = capacity - int(delta * capacity)
     for i in range(n_insert):
-        ft.insert(f"key{i}", f"value{i}")
+        if i % 2:
+            ft.insert(f"key{i}", f"value{i}")
+        else:
+            ft[f"key{i}"] = f"value{i}"
     # Check that inserted keys are found
     for i in range(n_insert):
-        assert ft.search(f"key{i}") == f"value{i}"
+        if i % 2:
+            assert ft[f"key{i}"] == f"value{i}"
+        else:
+            assert ft.search(f"key{i}") == f"value{i}"
     # A key that was not inserted should return None
     assert ft.search("nonexistent") is None
 
