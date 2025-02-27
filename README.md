@@ -26,8 +26,7 @@ Clone the repository and install via pip:
 bash
 git clone https://github.com/sternma/optopenhash.git
 cd optopenhash
-pip install .
-
+pip install -e '.'
 ```
 
 ## Usage
@@ -53,6 +52,6 @@ print(fhtable.search("key123"))
 
 A basic test suite is provided in the `tests` directory. To run the tests use:
 ```
-pytest tests
+tox -e unit-tests
 ```
 

@@ -1,0 +1,14 @@
+[tool.pytest.ini_options]
+xfail_strict = true
+# https://pytest-xdist.readthedocs.io/en/latest/known-limitations.html
+addopts = "--verbose -n logical --durations=0 --durations-min=1 --dist worksteal"
+testpaths = ["test/test_tables",]
+norecursedirs = [
+  ".tox",
+  ".git",
+  "*/migrations/*",
+  "*/static/*",
+  "docs",
+  "venv",
+  "*/{{cookiecutter.project_slug}}/*",
+]

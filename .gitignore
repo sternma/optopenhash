@@ -4,3 +4,10 @@ __pycache__
 build
 dist
 *.egg-info/
+
+/.coverage
+/.coverage.*
+/.cache
+/.pytest_cache
+/.mypy_cache
+/pip-wheel-metadata
