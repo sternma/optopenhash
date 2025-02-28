@@ -1,4 +1,10 @@
-import math, random, sys
+import math
+import random
+import sys
+
+_EMPTY = object()  # Marks an empty slot.
+_DELETED = object()  # Marks a deleted entry.
+_NOT_FOUND = object()  # Indicates "not found" internally.
 
 
 class ElasticHashTable:
@@ -20,7 +26,7 @@ class ElasticHashTable:
             sizes.append(size)
             remaining -= size
         sizes.append(remaining)
-        self.levels = [[None] * s for s in sizes]
+        self.levels = [[_EMPTY] * s for s in sizes]
         self.salts = [random.randint(0, sys.maxsize) for _ in range(num_levels)]
         self.occupancies = [0] * num_levels
         self.c = 4
@@ -44,17 +50,9 @@ class ElasticHashTable:
             size = len(level)
             occ = self.occupancies[i]
             free = size - occ
-            load = free / size
-            probe_limit = int(
-                max(
-                    1,
-                    self.c
-                    * min(
-                        math.log2(1 / load) if load > 0 else 0,
-                        math.log2(1 / self.delta),
-                    ),
-                )
-            )
+            load = free / size if size > 0 else 0
+
+            # For non-last levels, decide how many probes to do.
             if i < len(self.levels) - 1:
                 next_level = self.levels[i + 1]
                 next_occ = self.occupancies[i + 1]
@@ -62,57 +60,138 @@ class ElasticHashTable:
                 load_next = (next_free / len(next_level)) if len(next_level) > 0 else 0
                 threshold = 0.25
                 if load > (self.delta / 2) and load_next > threshold:
-                    for j in range(probe_limit):
-                        idx = self._quad_probe(key, i, j, size)
-                        if level[idx] is None:
-                            level[idx] = (key, value)
-                            self.occupancies[i] += 1
-                            self.num_inserts += 1
-                            return True
-                    # Try next level if not successful.
-                elif load <= (self.delta / 2):
-                    continue
-                elif load_next <= threshold:
-                    for j in range(size):
-                        idx = self._quad_probe(key, i, j, size)
-                        if level[idx] is None:
-                            level[idx] = (key, value)
-                            self.occupancies[i] += 1
-                            self.num_inserts += 1
-                            return True
+                    probe_limit = int(
+                        max(
+                            1,
+                            self.c
+                            * min(
+                                math.log2(1 / load) if load > 0 else 0,
+                                math.log2(1 / self.delta),
+                            ),
+                        )
+                    )
+                else:
+                    # Instead of skipping this level, scan the entire level so we can update if needed.
+                    probe_limit = size
             else:
-                for j in range(size):
-                    idx = self._quad_probe(key, i, j, size)
-                    if level[idx] is None:
+                probe_limit = size  # Last level: always scan entire level
+
+            candidate = None  # index of a _DELETED slot (if any)
+            empty_idx = None  # index of the first _EMPTY slot encountered
+            for j in range(probe_limit):
+                idx = self._quad_probe(key, i, j, size)
+                slot = level[idx]
+                # If the slot holds a valid entry, update if keys match.
+                if slot is not _EMPTY and slot is not _DELETED:
+                    if slot[0] == key:
                         level[idx] = (key, value)
-                        self.occupancies[i] += 1
-                        self.num_inserts += 1
                         return True
+                else:
+                    # Remember a candidate slot if it is marked _DELETED.
+                    if slot is _DELETED and candidate is None:
+                        candidate = idx
+                    # If we hit an empty slot, we can stop probing.
+                    if slot is _EMPTY:
+                        empty_idx = idx
+                        break
+
+            # If we didn't hit an _EMPTY in the initial probe, scan the remainder of the level.
+            if candidate is None and empty_idx is None:
+                for j in range(probe_limit, size):
+                    idx = self._quad_probe(key, i, j, size)
+                    slot = level[idx]
+                    if slot is _EMPTY or slot is _DELETED:
+                        empty_idx = idx
+                        break
+
+            # Decide where to insert: use the candidate (_DELETED) if available,
+            # otherwise the first _EMPTY slot found.
+            if candidate is not None:
+                idx = candidate
+            elif empty_idx is not None:
+                idx = empty_idx
+            else:
+                # No available slot in this level; try the next level.
+                continue
+
+            level[idx] = (key, value)
+            self.occupancies[i] += 1
+            self.num_inserts += 1
+            return True
+
         raise RuntimeError("Insertion failed in all levels; hash table is full.")
 
-    def __getitem__(self, key):
-        ret = self.search(key)
-        if ret is None:
-            raise KeyError(key)
-        return ret
-
-    def get(self, key, default=None):
-        return self.search(key) or default
-
-    def search(self, key):
+    def _search_internal(self, key):
         for i, level in enumerate(self.levels):
             size = len(level)
             for j in range(size):
                 idx = self._quad_probe(key, i, j, size)
                 entry = level[idx]
-                if entry is None:
+                if entry is _EMPTY:
                     break
+                if entry is _DELETED:
+                    continue
                 if entry[0] == key:
+                    return True, entry[1]
+        return False, _NOT_FOUND
+
+    def __getitem__(self, key):
+        found, value = self._search_internal(key)
+        if not found:
+            raise KeyError(key)
+        return value
+
+    def get(self, key, default=None):
+        found, value = self._search_internal(key)
+        return value if found else default
+
+    def pop(self, key, default=_NOT_FOUND):
+        for i, level in enumerate(self.levels):
+            size = len(level)
+            for j in range(size):
+                idx = self._quad_probe(key, i, j, size)
+                entry = level[idx]
+                if entry is _EMPTY:
+                    break
+                if entry is _DELETED:
+                    continue
+                if entry[0] == key:
+                    level[idx] = _DELETED
+                    self.occupancies[i] -= 1
+                    self.num_inserts -= 1
                     return entry[1]
-        return None
+        if default is _NOT_FOUND:
+            raise KeyError(key)
+        return default
+
+    def delete(self, key):
+        for i, level in enumerate(self.levels):
+            size = len(level)
+            for j in range(size):
+                idx = self._quad_probe(key, i, j, size)
+                entry = level[idx]
+                if entry is _EMPTY:
+                    break
+                if entry is _DELETED:
+                    continue
+                if entry[0] == key:
+                    level[idx] = _DELETED
+                    self.occupancies[i] -= 1
+                    self.num_inserts -= 1
+                    return True
+        return False
+
+    def __delitem__(self, key):
+        if not self.delete(key):
+            raise KeyError(key)
+
+    def search(self, key):
+        found, value = self._search_internal(key)
+        return value if found else _NOT_FOUND
 
     def __contains__(self, key):
-        return self.search(key) is not None
+        found, _ = self._search_internal(key)
+        return found
 
     def __len__(self):
         return self.num_inserts
