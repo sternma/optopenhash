@@ -2,6 +2,10 @@ import math
 import random
 import sys
 
+_EMPTY = object()      # Marks an empty slot.
+_DELETED = object()    # Marks a deleted entry.
+_NOT_FOUND = object()  # Internal "not found" sentinel.
+
 
 class FunnelHashTable:
     def __init__(self, capacity, delta=0.1):
@@ -37,17 +41,17 @@ class FunnelHashTable:
             a_i = min(a_i, remaining_buckets)
             self.level_bucket_counts.append(a_i)
             level_size = a_i * self.beta
-            level_array = [None] * level_size
+            level_array = [_EMPTY] * level_size
             self.levels.append(level_array)
             self.level_salts.append(random.randint(0, sys.maxsize))
             remaining_buckets -= a_i
         if remaining_buckets > 0 and self.levels:
             extra = remaining_buckets * self.beta
-            self.levels[-1].extend([None] * extra)
+            self.levels[-1].extend([_EMPTY] * extra)
             self.level_bucket_counts[-1] += remaining_buckets
             remaining_buckets = 0
 
-        self.special_array = [None] * self.special_size
+        self.special_array = [_EMPTY] * self.special_size
         self.special_salt = random.randint(0, sys.maxsize)
         self.special_occupancy = 0
 
@@ -72,7 +76,7 @@ class FunnelHashTable:
             start = bucket_index * self.beta
             end = start + self.beta
             for idx in range(start, end):
-                if level[idx] is None:
+                if level[idx] is _EMPTY or level[idx] is _DELETED:
                     level[idx] = (key, value)
                     self.num_inserts += 1
                     return True
@@ -81,10 +85,9 @@ class FunnelHashTable:
                     return True
         special = self.special_array
         size = len(special)
-        probe_limit = int(max(1, math.ceil(math.log(math.log(self.capacity + 1) + 1))))
-        for j in range(probe_limit):
+        for j in range(size):
             idx = (self._hash_special(key) + j) % size
-            if special[idx] is None:
+            if special[idx] is _EMPTY or special[idx] is _DELETED:
                 special[idx] = (key, value)
                 self.special_occupancy += 1
                 self.num_inserts += 1
@@ -92,29 +95,133 @@ class FunnelHashTable:
             elif special[idx][0] == key:
                 special[idx] = (key, value)
                 return True
-        idx1 = self._hash_special(key) % size
-        idx2 = (self._hash_special(key) + 1) % size
-        if special[idx1] is None:
-            special[idx1] = (key, value)
-            self.special_occupancy += 1
-            self.num_inserts += 1
-            return True
-        elif special[idx2] is None:
-            special[idx2] = (key, value)
-            self.special_occupancy += 1
-            self.num_inserts += 1
-            return True
-        else:
-            raise RuntimeError("Special array insertion failed; table is full.")
+        raise RuntimeError("Special array insertion failed; table is full.")
 
     def __getitem__(self, key):
         ret = self.search(key)
-        if ret is None:
+        if ret is _NOT_FOUND:
             raise KeyError(key)
         return ret
 
     def get(self, key, default=None):
-        return self.search(key) or default
+        ret = self.search(key)
+        return ret if ret is not _NOT_FOUND else default
+
+    def pop(self, key, default=_NOT_FOUND):
+        for i in range(len(self.levels)):
+            level = self.levels[i]
+            num_buckets = self.level_bucket_counts[i]
+            bucket_index = self._hash_level(key, i) % num_buckets
+            start = bucket_index * self.beta
+            end = start + self.beta
+            for idx in range(start, end):
+                entry = level[idx]
+                if entry is _EMPTY:
+                    break
+                if entry is _DELETED:
+                    continue
+                if entry[0] == key:
+                    level[idx] = _DELETED
+                    self.num_inserts -= 1
+                    return entry[1]
+        special = self.special_array
+        size = len(special)
+        probe_limit = int(max(1, math.ceil(math.log(math.log(self.capacity + 1) + 1))))
+        for j in range(probe_limit):
+            idx = (self._hash_special(key) + j) % size
+            entry = special[idx]
+            if entry is _EMPTY:
+                break
+            if entry is _DELETED:
+                continue
+            if entry[0] == key:
+                special[idx] = _DELETED
+                self.num_inserts -= 1
+                self.special_occupancy -= 1
+                return entry[1]
+        idx1 = self._hash_special(key) % size
+        idx2 = (self._hash_special(key) + 1) % size
+        if (
+            special[idx1] is not _EMPTY
+            and special[idx1] is not _DELETED
+            and special[idx1][0] == key
+        ):
+            value = special[idx1][1]
+            special[idx1] = _DELETED
+            self.num_inserts -= 1
+            self.special_occupancy -= 1
+            return value
+        if (
+            special[idx2] is not _EMPTY
+            and special[idx2] is not _DELETED
+            and special[idx2][0] == key
+        ):
+            value = special[idx2][1]
+            special[idx2] = _DELETED
+            self.num_inserts -= 1
+            self.special_occupancy -= 1
+            return value
+        if default is _NOT_FOUND:
+            raise KeyError(key)
+        return default
+
+    def delete(self, key):
+        for i in range(len(self.levels)):
+            level = self.levels[i]
+            num_buckets = self.level_bucket_counts[i]
+            bucket_index = self._hash_level(key, i) % num_buckets
+            start = bucket_index * self.beta
+            end = start + self.beta
+            for idx in range(start, end):
+                entry = level[idx]
+                if entry is _EMPTY:
+                    break
+                if entry is _DELETED:
+                    continue
+                if entry[0] == key:
+                    level[idx] = _DELETED
+                    self.num_inserts -= 1
+                    return True
+        special = self.special_array
+        size = len(special)
+        probe_limit = int(max(1, math.ceil(math.log(math.log(self.capacity + 1) + 1))))
+        for j in range(probe_limit):
+            idx = (self._hash_special(key) + j) % size
+            entry = special[idx]
+            if entry is _EMPTY:
+                break
+            if entry is _DELETED:
+                continue
+            if entry[0] == key:
+                special[idx] = _DELETED
+                self.num_inserts -= 1
+                self.special_occupancy -= 1
+                return True
+        idx1 = self._hash_special(key) % size
+        idx2 = (self._hash_special(key) + 1) % size
+        if (
+            special[idx1] is not _EMPTY
+            and special[idx1] is not _DELETED
+            and special[idx1][0] == key
+        ):
+            special[idx1] = _DELETED
+            self.num_inserts -= 1
+            self.special_occupancy -= 1
+            return True
+        if (
+            special[idx2] is not _EMPTY
+            and special[idx2] is not _DELETED
+            and special[idx2][0] == key
+        ):
+            special[idx2] = _DELETED
+            self.num_inserts -= 1
+            self.special_occupancy -= 1
+            return True
+        return False
+
+    def __delitem__(self, key):
+        if not self.delete(key):
+            raise KeyError(key)
 
     def search(self, key):
         for i in range(len(self.levels)):
@@ -124,29 +231,43 @@ class FunnelHashTable:
             start = bucket_index * self.beta
             end = start + self.beta
             for idx in range(start, end):
-                if level[idx] is None:
+                entry = level[idx]
+                if entry is _EMPTY:
                     break
-                elif level[idx][0] == key:
-                    return level[idx][1]
+                if entry is _DELETED:
+                    continue
+                if entry[0] == key:
+                    return entry[1]
         special = self.special_array
         size = len(special)
         probe_limit = int(max(1, math.ceil(math.log(math.log(self.capacity + 1) + 1))))
         for j in range(probe_limit):
             idx = (self._hash_special(key) + j) % size
-            if special[idx] is None:
+            entry = special[idx]
+            if entry is _EMPTY:
                 break
-            elif special[idx][0] == key:
-                return special[idx][1]
+            if entry is _DELETED:
+                continue
+            if entry[0] == key:
+                return entry[1]
         idx1 = self._hash_special(key) % size
         idx2 = (self._hash_special(key) + 1) % size
-        if special[idx1] is not None and special[idx1][0] == key:
+        if (
+            special[idx1] is not _EMPTY
+            and special[idx1] is not _DELETED
+            and special[idx1][0] == key
+        ):
             return special[idx1][1]
-        if special[idx2] is not None and special[idx2][0] == key:
+        if (
+            special[idx2] is not _EMPTY
+            and special[idx2] is not _DELETED
+            and special[idx2][0] == key
+        ):
             return special[idx2][1]
-        return None
+        return _NOT_FOUND
 
     def __contains__(self, key):
-        return self.search(key) is not None
+        return self.search(key) is not _NOT_FOUND
 
     def __len__(self):
         return self.num_inserts
